@@ -39,14 +39,15 @@ h_sub = 1.52
 h_prs = 1.52
 h_rcm = 1.52                      # RCM board
 
-# Feed (Stage-A / known-good in-cavity baseline: ~4.6% match, ~15 dBi peak directivity).
-# NOTE: feed-only slot DE gave -12.65 dB in isolation but only -1.1 dB in the cavity -- the
-# cavity strongly loads the feed (R->15-30 ohm, X->+77j), so the feed must be co-tuned
-# WITH the cavity (see fpc3_gain_de_opt, 6-knob realized-gain DE). Feed-only does NOT transfer.
-L  = 26.5
-W  = 29.4
+# Feed -- current best from the 6-knob feed+cavity realized-gain DE (co-tuned WITH the
+# cavity: feed-only matching does NOT transfer, since the cavity loads the feed to R~15-30
+# ohm, X->+77j). Best so far: worst-in-band realized gain +9.40 dBi across 3.1-3.4 GHz.
+# These defaults double as the optimizer's warm-start seed (used when no de_state/JSON exists,
+# e.g. a fresh EC2 clone), so the search resumes from this design without any file copy.
+L  = 24.5
+W  = 30.8
 Wf = 3.89
-y0 = 9.5
+y0 = 5.0
 g  = 1.0
 Lf = 10.0
 
@@ -78,7 +79,7 @@ P     = 21.5
 r1    = 10
 pb    = 20.7
 sb    = 16.0
-h_cav = 50.5                      # ground -> PRS bottom face (grid PRS Trentini height)
+h_cav = 52.0                      # ground -> PRS bottom face (Trentini height; DE co-opt best)
 
 # PRS bottom = fine INDUCTIVE wire mesh (paper's "meshed patch"), not isolated loops.
 # Gives ~4x flatter reflection-phase slope + rising |Gamma| -> wideband. (unit-cell tuned)
@@ -92,7 +93,7 @@ RCM_ON = True
 N_RCM  = 4                        # 4x4 RCM cells over the 8x8 PRS (2x2 PRS cells each)
 P_RCM  = 2 * P                    # RCM period = 2x PRS period = 43 mm
 rcm_s  = 41.0                     # RCM tile size (~2 PRS cells; large square)
-h3     = 49.5                     # PRS top -> RCM plane
+h3     = 51.0                     # PRS top -> RCM plane (DE co-opt best)
 
 # Multi-size RCM (paper's bandwidth mechanism): each RCM super-cell is SUBDIVIDED into an
 # NxN array of squares. Interleaving tiles of 1x1 / 3x3 / 4x4 staggers their resonances
@@ -106,7 +107,7 @@ RCM_MULTI = True                  # True -> subdivided tiles per RCM_MAP; False 
 RCM_MAP   = [3, 4, 4, 3, 4, 1, 1, 4, 4, 1, 1, 4, 3, 4, 4, 3]
 # every tile has the SAME footprint (rcm_s), so inter-tile gaps are all identical
 # (P_RCM - rcm_s). Sub-squares fill that footprint edge-to-edge, split by rcm_gap.
-rcm_gap   = 2.0                   # internal spacing between sub-squares within a tile (tunable)
+rcm_gap   = 5.5                   # spacing between sub-squares within a tile (DE co-opt best)
 
 air_xy, air_above, air_below = 35.0, 45.0, 20.0
 feed_R = 50.0
