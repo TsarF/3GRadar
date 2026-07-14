@@ -21,6 +21,7 @@
 !*.m
 !*.md
 !*.ps1
+!*.sh
 !*.png
 !*.kicad_pcb
 !*.kicad_pro
