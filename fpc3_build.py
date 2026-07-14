@@ -35,6 +35,10 @@ fc = 1.00e9
 
 eps_r = 2.94
 tan_d = 0.0016
+cu_sigma = 5.8e7                  # copper conductivity [S/m] -- finite (not PEC): realistic
+cu_t     = 35e-6                  # copper thickness [m] (1 oz). Loss lowers the runaway cavity
+                                  # Q (PEC = infinite Q -> pathological ring-down) and de-biases
+                                  # the realized-gain estimate downward to a realistic value.
 h_sub = 1.52
 h_prs = 1.52
 h_rcm = 1.52                      # RCM board
@@ -238,11 +242,14 @@ def build_antenna(CSX, FDTD):
     feed_sub = CSX.AddMaterial('feed_sub', epsilon=eps_r, kappa=kappa)
     prs_sub  = CSX.AddMaterial('prs_sub',  epsilon=eps_r, kappa=kappa)
     rcm_sub  = CSX.AddMaterial('rcm_sub',  epsilon=eps_r, kappa=kappa)
-    gnd   = CSX.AddMetal('gnd')
-    patch = CSX.AddMetal('feed_patch')
-    prs_b = CSX.AddMetal('prs_bottom')
-    prs_t = CSX.AddMetal('prs_top')
-    rcm   = CSX.AddMetal('rcm')
+    # finite-conductivity copper (not PEC): realistic loss + tames the cavity Q
+    def _cu(name):
+        return CSX.AddConductingSheet(name, conductivity=cu_sigma, thickness=cu_t)
+    gnd   = _cu('gnd')
+    patch = _cu('feed_patch')
+    prs_b = _cu('prs_bottom')
+    prs_t = _cu('prs_top')
+    rcm   = _cu('rcm')
 
     B = (max(L, W) / 2.0 + 20.0) if FEED_ONLY else ap_half   # compact ground for feed-only
     off = (N_PRS - 1) / 2.0

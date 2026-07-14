@@ -261,7 +261,7 @@ def main():
     # SIG guards against resuming a state built with different knobs/mesh/NP/bounds.
     SIG = {'names': tuple(names), 'mesh_div': 16, 'NP': NP,
            'lo': tuple(map(float, lo)), 'hi': tuple(map(float, hi)),
-           'nrts': EVAL_NRTS, 'bc': 'PML6'}   # changing sim fidelity invalidates old cache
+           'nrts': EVAL_NRTS, 'bc': 'PML6', 'metal': 'Cu'}   # sim-fidelity change invalidates old cache
     # ST holds the gen-BOUNDARY snapshot (pop, costs, gen, rng). cache/history/best/n_eval
     # are updated every eval; ST['rng'] only at gen boundaries, so a mid-gen interruption
     # regenerates that gen's identical trials -> its completed evals are cache-hits on resume.
