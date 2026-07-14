@@ -1,0 +1,41 @@
+# ── Whitelist policy ─────────────────────────────────────────────────────────
+# This working directory also holds GBs of openEMS/FDTD run output and a
+# copyrighted reference paper PDF. Rather than enumerate every generated
+# artifact, ignore EVERYTHING at the top level and re-include only source/design
+# files. New simulation output directories are therefore excluded automatically.
+# (Note: git .gitignore has NO trailing/inline comments — keep comments on their
+#  own lines, or the pattern silently includes the comment text.)
+
+# ignore all top-level entries by default
+/*
+
+# ...but keep source, docs, and the KiCad project:
+# .py  openEMS/Python builders, characterizers, DE optimizers
+# .m   MATLAB antenna scripts
+# .md  design notes / run guides
+# .ps1 watchdog
+# .png small top-level geometry visualizations
+!.gitignore
+!README.md
+!*.py
+!*.m
+!*.md
+!*.ps1
+!*.png
+!*.kicad_pcb
+!*.kicad_pro
+!*.kicad_prl
+!*.kicad_sch
+!fp-lib-table
+!Parts.pretty/
+
+# Never publish, regardless of the rules above:
+#   *.pdf  -> the copyrighted reference paper (Ding et al.) stays local
+#   sim run data, checkpoints, logs, caches all live in ignored output dirs
+*.pdf
+__pycache__/
+*.pyc
+*.pkl
+*.h5
+*.vtk
+*.npz
