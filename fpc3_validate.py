@@ -31,7 +31,7 @@ p1.mesh_res = (p1.C0 / (p1.f0 + p1.fc)) / p1.unit / 22.0     # accurate mesh
 p1._recompute()
 
 BAND_LO, BAND_HI = 3.10e9, 3.40e9
-NRTS, ENDC, NFREQ, NGAIN = 90000, 5e-5, 601, 13
+NRTS, ENDC, NFREQ, NGAIN = 150000, 5e-5, 601, 13   # high NRTS ceiling; PML lets it ring down
 sim_path = os.path.join(os.getcwd(), 'fpc3_validate')
 os.makedirs(sim_path, exist_ok=True)
 
@@ -73,7 +73,7 @@ def main():
     with _redirect(log):
         FDTD = openEMS(NrTS=NRTS, EndCriteria=ENDC)
         FDTD.SetGaussExcite(p1.f0, p1.fc)
-        FDTD.SetBoundaryCond(['MUR', 'MUR', 'MUR', 'MUR', 'MUR', 'PML_8'])
+        FDTD.SetBoundaryCond(['PML_8'] * 6)   # PML all sides: absorb the trapped lateral mode
         CSX = ContinuousStructure(); FDTD.SetCSX(CSX)
         p1.build_antenna(CSX, FDTD)
         port = FDTD.AddLumpedPort(1, p1.feed_R, [p1.feed_x, p1.feed_y, 0],

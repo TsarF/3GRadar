@@ -100,8 +100,8 @@ WARM_START_FROM = os.environ.get('FPC_WARM', os.path.join(sim_path, 'optimized_p
 # durable storage (persistent EBS or an S3-synced dir) so it survives instance replacement.
 CKPT_PATH = os.environ.get('FPC_CKPT', os.path.join(sim_path, 'de_state.pkl'))
 
-EVAL_NRTS        = 70000
-EVAL_ENDCRITERIA = 1e-3
+EVAL_NRTS        = 150000         # safety ceiling; with PML sides most evals hit the -30 dB
+EVAL_ENDCRITERIA = 1e-3           # EndCriteria (~77k steps for Q~22) well before this cap
 EVAL_NFREQ       = 61
 EVAL_FPAD        = 0.15e9
 
@@ -175,7 +175,11 @@ def eval_worker(payload):
         with _redirect_fds(log):
             FDTD = openEMS(NrTS=EVAL_NRTS, EndCriteria=EVAL_ENDCRITERIA)
             FDTD.SetGaussExcite(p1.f0, p1.fc)
-            FDTD.SetBoundaryCond(['MUR', 'MUR', 'MUR', 'MUR', 'MUR', 'PML_8'])
+            # PML on ALL sides (was MUR on the 4 lateral walls). MUR reflects the grazing
+            # parallel-plate mode trapped between the big PEC planes, so domain energy never
+            # decayed to EndCriteria and ~82% of evals hit the NRTS cap TRUNCATED (unreliable
+            # S11/gain). PML absorbs that mode -> ring-down follows the true antenna Q.
+            FDTD.SetBoundaryCond(['PML_8'] * 6)
             CSX = ContinuousStructure(); FDTD.SetCSX(CSX)
             p1.build_antenna(CSX, FDTD)
             port = FDTD.AddLumpedPort(1, p1.feed_R,
@@ -256,7 +260,8 @@ def main():
     # ---- full-state checkpoint (survives spot/preemptible interruption) ----
     # SIG guards against resuming a state built with different knobs/mesh/NP/bounds.
     SIG = {'names': tuple(names), 'mesh_div': 16, 'NP': NP,
-           'lo': tuple(map(float, lo)), 'hi': tuple(map(float, hi))}
+           'lo': tuple(map(float, lo)), 'hi': tuple(map(float, hi)),
+           'nrts': EVAL_NRTS, 'bc': 'PML6'}   # changing sim fidelity invalidates old cache
     # ST holds the gen-BOUNDARY snapshot (pop, costs, gen, rng). cache/history/best/n_eval
     # are updated every eval; ST['rng'] only at gen boundaries, so a mid-gen interruption
     # regenerates that gen's identical trials -> its completed evals are cache-hits on resume.
