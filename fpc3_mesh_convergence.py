@@ -50,15 +50,20 @@ os.makedirs(sim_path, exist_ok=True)
 # Design under test (default = build's current seed). Set to your EC2 winner to check it.
 BEST = None   # None -> use fpc3_build defaults; else dict(h_cav=..,h3=..,rcm_gap=..,y0=..,L=..,W=..)
 
-# name -> (mesh_div, edge_res, min_cell)
-CONFIGS = {
-    'TRUTH_d22':   (22, 0.40, 0.05),   # reference / validation fidelity
-    'SEARCH_d16':  (16, 0.40, 0.05),   # current search mesh
+# name -> (mesh_div, edge_res, min_cell). Reference is the current search mesh (div16/edge0.4)
+# -- the mesh we're deciding whether to coarsen FROM. Set FPC_TRUTH=1 to also run the ~12M-cell
+# div22 mesh (confirms div16 itself is converged), but that ~doubles the runtime (long pole).
+INCLUDE_TRUTH = os.environ.get('FPC_TRUTH', '0') == '1'
+CONFIGS = {}
+if INCLUDE_TRUTH:
+    CONFIGS['TRUTH_d22'] = (22, 0.40, 0.05)
+CONFIGS.update({
+    'SEARCH_d16':  (16, 0.40, 0.05),   # current search mesh (reference)
     'COARSE_e0.8': (16, 0.80, 0.15),   # ~3x faster
     'COARSE_e1.0': (16, 1.00, 0.20),   # ~4x faster
     'COARSE_e1.2': (16, 1.20, 0.25),   # ~7x faster
-}
-REF = 'TRUTH_d22'
+})
+REF = 'TRUTH_d22' if INCLUDE_TRUTH else 'SEARCH_d16'
 
 
 @contextlib.contextmanager
@@ -164,7 +169,8 @@ def main():
     print('\n===================== MESH CONVERGENCE =====================')
     print('%-12s | cells | worst-Gr | dGr(ref) | worst-S11 | dS11 | Dmax | conv | steps | %ss'
           % ('config', 'time'))
-    order = ['TRUTH_d22', 'SEARCH_d16', 'COARSE_e0.8', 'COARSE_e1.0', 'COARSE_e1.2']
+    order = [n for n in ['TRUTH_d22', 'SEARCH_d16', 'COARSE_e0.8', 'COARSE_e1.0', 'COARSE_e1.2']
+             if n in CONFIGS]
     rows = []
     for name in order:
         r = res.get(name)
