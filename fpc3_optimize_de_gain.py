@@ -32,6 +32,7 @@ Out:  fpc3_gain_de_opt<TAG>/optimized_params.json | optimization_log.csv | live_
 """
 
 import os
+import re
 import sys
 import csv
 import json
@@ -57,7 +58,7 @@ p1.mesh_res = (p1.C0 / (p1.f0 + p1.fc)) / p1.unit / 16.0
 
 # ============================ optimiser config ============================
 BAND_LO, BAND_HI = 3.10e9, 3.40e9
-NGAIN            = 5
+NGAIN            = 9      # nf2ff sample freqs (directivity); match term is evaluated densely
 GAIN_TARGET      = None
 GUIDE_W          = 2.0
 
@@ -102,7 +103,7 @@ CKPT_PATH = os.environ.get('FPC_CKPT', os.path.join(sim_path, 'de_state.pkl'))
 
 EVAL_NRTS        = 150000         # safety ceiling; with PML sides most evals hit the -30 dB
 EVAL_ENDCRITERIA = 1e-3           # EndCriteria (~77k steps for Q~22) well before this cap
-EVAL_NFREQ       = 61
+EVAL_NFREQ       = 121   # dense |S11| grid for the ungameable worst-in-band match term
 EVAL_FPAD        = 0.15e9
 
 names  = list(PARAMS.keys())
@@ -166,12 +167,13 @@ def eval_worker(payload):
         pen = float(np.sum(((np.asarray(x) - c) / np.array([6, 12, 4, 4, 2, 4]))**2))
         Gr = np.full(NGAIN, 14.0 - pen)
         s11 = np.full(EVAL_NFREQ, -8.0 - 4.0 * np.exp(-pen))
-        return f, s11, f_g, Gr
+        return f, s11, f_g, Gr, float(Gr.min())
     logdir = os.path.join(sim_path, 'openems_logs'); os.makedirs(logdir, exist_ok=True)
     log = os.path.join(logdir, 'worker_%d.log' % os.getpid())
     try:
         set_params(dict(zip(names, x)))
         os.makedirs(run_dir, exist_ok=True)
+        log_pos = os.path.getsize(log) if os.path.exists(log) else 0   # for convergence check
         with _redirect_fds(log):
             FDTD = openEMS(NrTS=EVAL_NRTS, EndCriteria=EVAL_ENDCRITERIA)
             FDTD.SetGaussExcite(p1.f0, p1.fc)
@@ -201,13 +203,42 @@ def eval_worker(payload):
             nf = nf2ff.CalcNF2FF(run_dir, f_g, np.array([0.0]), np.array([0.0]), center=center)
             Pacc_g = np.interp(f_g, f, Pacc_f)
             s11_g  = np.interp(f_g, f, s11mag)
-            Gr_dBi = np.empty(NGAIN)
+            Gr_dBi = np.empty(NGAIN)                     # sparse, for the live plot
             for i in range(NGAIN):
                 eta_rad   = np.clip(nf.Prad[i] / Pacc_g[i], 0, 1)
                 eta_match = max(1.0 - s11_g[i]**2, 0.0)
                 Gr_dBi[i] = 10 * np.log10(max(nf.Dmax[i] * eta_rad * eta_match, 1e-6))
+            # OBJECTIVE = worst-in-band realized gain on the DENSE |S11| grid. Evaluating the
+            # match at only NGAIN nf2ff points lets the DE game it: a high-Q narrowband design
+            # dips |S11| at exactly those points while the match is garbage in between, scoring
+            # a fake ~+16 dBi. Directivity/eta_rad vary smoothly -> interpolate them onto the
+            # dense grid; the sharp, gameable match term uses the dense |S11| directly.
+            Dmax_g = np.array([nf.Dmax[i] for i in range(NGAIN)])
+            Prad_g = np.array([nf.Prad[i] for i in range(NGAIN)])
+            inb = (f >= BAND_LO) & (f <= BAND_HI)
+            D_d    = np.interp(f, f_g, Dmax_g)[inb]
+            Prad_d = np.interp(f, f_g, Prad_g)[inb]
+            etar_d = np.clip(Prad_d / Pacc_f[inb], 0, 1)
+            etam_d = np.clip(1.0 - s11mag[inb]**2, 0, 1)
+            worst_dense = float(np.min(10 * np.log10(np.maximum(D_d * etar_d * etam_d, 1e-6))))
+        # NON-CONVERGENCE GUARD: if the fields never rang down to the -30 dB EndCriteria (the
+        # run hit the NRTS cap while still sloshing), the NF2FF directivity is computed on
+        # unsettled fields and comes out inflated (can exceed the physical aperture ceiling) --
+        # and such a design is high-Q / narrowband anyway. Penalize so the DE rejects it.
+        last_db = 0.0
+        try:
+            with open(log) as lh:
+                lh.seek(log_pos)
+                for line in lh:
+                    m = re.search(r'\(-\s*([0-9.]+)dB\)', line)
+                    if m:
+                        last_db = float(m.group(1))
+        except Exception:
+            pass
+        if last_db < 27.0:                      # not settled -> untrustworthy far-field
+            worst_dense -= 15.0
         _rmtree_retry(run_dir)
-        return f, s11_dB, f_g, Gr_dBi
+        return f, s11_dB, f_g, Gr_dBi, worst_dense
     except Exception:
         return None
 
@@ -261,7 +292,7 @@ def main():
     # SIG guards against resuming a state built with different knobs/mesh/NP/bounds.
     SIG = {'names': tuple(names), 'mesh_div': 16, 'NP': NP,
            'lo': tuple(map(float, lo)), 'hi': tuple(map(float, hi)),
-           'nrts': EVAL_NRTS, 'bc': 'PML6', 'metal': 'Cu'}   # sim-fidelity change invalidates old cache
+           'nrts': EVAL_NRTS, 'bc': 'PML6', 'metal': 'Cu', 'obj': 'dense-worst'}  # invalidates gamed cache
     # ST holds the gen-BOUNDARY snapshot (pop, costs, gen, rng). cache/history/best/n_eval
     # are updated every eval; ST['rng'] only at gen boundaries, so a mid-gen interruption
     # regenerates that gen's identical trials -> its completed evals are cache-hits on resume.
@@ -372,8 +403,8 @@ def main():
             if res is None:
                 tup = (1e9, -np.inf, None, None, None, None)
             else:
-                ff, s11, f_g, Gr = res
-                gain = float(Gr.min())
+                ff, s11, f_g, Gr, worst_dense = res
+                gain = worst_dense                     # dense worst-in-band (ungameable)
                 cost = -gain + GUIDE_W * resonance_offset(ff, s11)
                 tup = (cost, gain, ff, s11, f_g, Gr)
             cache[key(x)] = tup
