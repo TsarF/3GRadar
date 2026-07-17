@@ -62,6 +62,14 @@ NGAIN            = 9      # nf2ff sample freqs (directivity); match term is eval
 GAIN_TARGET      = None
 GUIDE_W          = 2.0
 
+# Soft match penalty: realized gain barely punishes a bad match (a -5 dB match only costs
+# 1.65 dB of gain), so the DE happily trades match for directivity. We subtract a GRADED
+# penalty for worst-in-band |S11| above the target -- soft (not a hard floor) so it still
+# gives a gradient while nothing yet reaches -10 dB. score = gain - MATCH_K*max(0, S11-target).
+MATCH_TARGET_DB  = -10.0
+MATCH_K          = 1.0   # dB of score lost per dB of worst-in-band S11 above the target
+NONCONV_PENALTY  = 15.0  # score penalty when the field didn't settle (untrustworthy far-field)
+
 # --- parallelism / run-identity are ENV-CONFIGURABLE so the SAME script + checkpoint format
 #     runs on this box AND a big many-core machine without editing code. openEMS FDTD is
 #     memory-bandwidth bound, so throughput comes from MORE WORKERS, not more threads/sim.
@@ -83,12 +91,17 @@ sim_path = os.path.join(os.getcwd(), 'fpc3_gain_de_opt' + _TAG)
 os.makedirs(sim_path, exist_ok=True)
 
 PARAMS = {
-    'h_cav':   (p1.h_cav,   42.0, 52.0, 0.5),   # PRS cavity height (Trentini gain-peak freq)
-    'h3':      (p1.h3,      36.0, 58.0, 0.5),   # PRS -> RCM gap
-    'rcm_gap': (p1.rcm_gap,  0.5,  8.0, 0.5),   # RCM sub-square spacing (staggers resonances -> BW)
-    'y0':      (p1.y0,       5.0, 13.0, 0.2),   # feed inset (match: input R / coupling)
-    'L':       (p1.L,       24.5, 28.5, 0.1),   # patch length (match: centers/deepens S11 dip)
-    'W':       (p1.W,       26.0, 33.0, 0.2),   # patch width (match: input impedance / Q)
+    'h_cav':    (p1.h_cav,   42.0, 52.0, 0.5),  # PRS cavity height (Trentini gain-peak freq)
+    'h3':       (p1.h3,      36.0, 58.0, 0.5),  # PRS -> RCM gap
+    'rcm_gap':  (p1.rcm_gap,  0.5,  8.0, 0.5),  # RCM sub-square spacing (staggers resonances -> BW)
+    'y0':       (p1.y0,       5.0, 13.0, 0.2),  # feed inset (match: input R / coupling)
+    'L':        (p1.L,       24.5, 28.5, 0.1),  # patch length (match: centers/deepens S11 dip)
+    'W':        (p1.W,       26.0, 33.0, 0.2),  # patch width (match: input impedance / Q)
+    # U-slot on the feed patch = broadbanding lever (adds a 2nd resonance) to break the ~-8 dB
+    # match plateau. Co-tuned WITH the cavity here (feed-only tuning did NOT transfer).
+    'slot_len': (8.0,         3.0, 16.0, 0.5),  # U arm length (x)
+    'slot_w':   (10.0,        4.0, 22.0, 0.5),  # U arm separation / tongue width (y)
+    'slot_x':   (3.0,         1.0, 10.0, 0.5),  # U base x-position
 }
 
 # Warm-start seed: own checkpoint by default; set FPC_WARM to a path (e.g. the other
@@ -123,6 +136,7 @@ def set_params(values):
     for name, val in values.items():
         setattr(p1, name, float(val))
     p1.RCM_ON = True
+    p1.SLOT_ON = True                 # slot_len/slot_w/slot_x are now DE knobs
     p1._recompute()
 
 
@@ -162,12 +176,12 @@ def eval_worker(payload):
         time.sleep(float(os.environ.get('FPC_FAKE_SLEEP', '0')))
         f = np.linspace(BAND_LO - EVAL_FPAD, BAND_HI + EVAL_FPAD, EVAL_NFREQ)
         f_g = np.linspace(BAND_LO, BAND_HI, NGAIN)
-        # smooth deterministic surrogate so the DE has a real gradient to climb
-        c = np.array([46.0, 49.0, 2.0, 6.0, 26.5, 30.0])
-        pen = float(np.sum(((np.asarray(x) - c) / np.array([6, 12, 4, 4, 2, 4]))**2))
+        # smooth deterministic surrogate so the DE has a real gradient to climb (knob-agnostic)
+        c = 0.5 * (lo + hi)
+        pen = float(np.sum(((np.asarray(x) - c) / ((hi - lo) / 2.0))**2))
         Gr = np.full(NGAIN, 14.0 - pen)
         s11 = np.full(EVAL_NFREQ, -8.0 - 4.0 * np.exp(-pen))
-        return f, s11, f_g, Gr, float(Gr.min())
+        return f, s11, f_g, Gr, float(Gr.min()), float(s11.max()), True
     logdir = os.path.join(sim_path, 'openems_logs'); os.makedirs(logdir, exist_ok=True)
     log = os.path.join(logdir, 'worker_%d.log' % os.getpid())
     try:
@@ -221,10 +235,10 @@ def eval_worker(payload):
             etar_d = np.clip(Prad_d / Pacc_f[inb], 0, 1)
             etam_d = np.clip(1.0 - s11mag[inb]**2, 0, 1)
             worst_dense = float(np.min(10 * np.log10(np.maximum(D_d * etar_d * etam_d, 1e-6))))
-        # NON-CONVERGENCE GUARD: if the fields never rang down to the -30 dB EndCriteria (the
-        # run hit the NRTS cap while still sloshing), the NF2FF directivity is computed on
-        # unsettled fields and comes out inflated (can exceed the physical aperture ceiling) --
-        # and such a design is high-Q / narrowband anyway. Penalize so the DE rejects it.
+            worst_s11 = float(np.max(20 * np.log10(s11mag[inb])))   # worst in-band |S11| (dB)
+        # Convergence flag: did the field ring down to the -30 dB EndCriteria before the NRTS
+        # cap? If not, the NF2FF directivity was computed on unsettled fields (inflated, can
+        # exceed the aperture ceiling) and the design is high-Q. The penalty is applied in main.
         last_db = 0.0
         try:
             with open(log) as lh:
@@ -235,10 +249,8 @@ def eval_worker(payload):
                         last_db = float(m.group(1))
         except Exception:
             pass
-        if last_db < 27.0:                      # not settled -> untrustworthy far-field
-            worst_dense -= 15.0
         _rmtree_retry(run_dir)
-        return f, s11_dB, f_g, Gr_dBi, worst_dense
+        return f, s11_dB, f_g, Gr_dBi, worst_dense, worst_s11, (last_db >= 27.0)
     except Exception:
         return None
 
@@ -292,7 +304,8 @@ def main():
     # SIG guards against resuming a state built with different knobs/mesh/NP/bounds.
     SIG = {'names': tuple(names), 'mesh_div': 16, 'NP': NP,
            'lo': tuple(map(float, lo)), 'hi': tuple(map(float, hi)),
-           'nrts': EVAL_NRTS, 'bc': 'PML6', 'metal': 'Cu', 'obj': 'dense-worst'}  # invalidates gamed cache
+           'nrts': EVAL_NRTS, 'bc': 'PML6', 'metal': 'Cu',
+           'obj': 'dense-worst+matchpen', 'mt': MATCH_TARGET_DB, 'mk': MATCH_K}  # invalidates old cache
     # ST holds the gen-BOUNDARY snapshot (pop, costs, gen, rng). cache/history/best/n_eval
     # are updated every eval; ST['rng'] only at gen boundaries, so a mid-gen interruption
     # regenerates that gen's identical trials -> its completed evals are cache-hits on resume.
@@ -332,22 +345,27 @@ def main():
         best = st['best']
         rng = random.Random(); rng.setstate(st['rng'])
         ST.update(pop=pop, pop_cost=st['pop_cost'], gen=st['gen'], rng=st['rng'])
-        print('>>> RESUMED from %s: gen=%d, %d evals, best worst-Gr=%+.2f dBi'
+        print('>>> RESUMED from %s: gen=%d, %d evals, best score=%+.2f (gain %+.2f dBi, S11 %+.1f dB)'
               % (os.path.basename(CKPT_PATH), st['gen'], n_eval[0],
-                 best['gain'] if np.isfinite(best['gain']) else float('nan')))
+                 best.get('score', float('nan')), best.get('gain', float('nan')),
+                 best.get('s11_worst', float('nan'))))
     else:
         pop, rng = initial_population()
-        best = {'gain': -np.inf, 'x': pop[0].copy(), 'f': None, 's11': None, 'f_g': None, 'Gr': None}
+        best = {'score': -np.inf, 'gain': -np.inf, 's11_worst': np.inf,
+                'x': pop[0].copy(), 'f': None, 's11': None, 'f_g': None, 'Gr': None}
         ST.update(pop=pop, pop_cost=None, gen=-1, rng=rng.getstate())
 
     def save_best():
-        if not np.isfinite(best['gain']):
+        if not np.isfinite(best['score']):
             return
         bx = dict(zip(names, best['x']))
         tmp = os.path.join(sim_path, 'optimized_params.json.tmp')
         with open(tmp, 'w') as fh:
-            json.dump({'objective': 'max worst-in-band realized gain (feed+PRS+RCM)', 'optimizer': 'DE',
+            json.dump({'objective': 'max [worst-in-band realized gain - MATCH_K*max(0, worstS11 - target)]',
+                       'optimizer': 'DE', 'match_target_dB': MATCH_TARGET_DB, 'match_K': MATCH_K,
+                       'score': best['score'],
                        'worst_realized_gain_dBi': best['gain'],
+                       'worst_in_band_S11_dB': best['s11_worst'],
                        'gain_across_band': None if best['Gr'] is None else list(map(float, best['Gr'])),
                        'band_GHz': [BAND_LO/1e9, BAND_HI/1e9], 'evals_so_far': n_eval[0],
                        'fixed_mm': {'rcm_s': p1.rcm_s, 'sb': p1.sb, 'N_PRS': p1.N_PRS, 'P': p1.P,
@@ -358,9 +376,9 @@ def main():
     def save_log():
         with open(os.path.join(sim_path, 'optimization_log.csv'), 'w', newline='') as fh:
             w = csv.writer(fh)
-            w.writerow(['eval'] + names + ['worst_realized_gain_dBi'])
-            for i, x, gv in history:
-                w.writerow([i] + ['%.3f' % v for v in x] + ['%.3f' % gv])
+            w.writerow(['eval'] + names + ['worst_gain_dBi', 'worst_S11_dB', 'score'])
+            for i, x, gv, s11v, sc in history:
+                w.writerow([i] + ['%.3f' % v for v in x] + ['%.3f' % gv, '%.3f' % s11v, '%.3f' % sc])
 
     def live_plot():
         if best['f'] is None:
@@ -369,9 +387,11 @@ def main():
             fig, ax = plt.subplots(1, 2, figsize=(12, 4.5))
             ax[0].plot(best['f']/1e9, best['s11'], lw=1.8); ax[0].axhline(-10, color='r', ls='--', lw=0.8)
             ax[0].axvspan(BAND_LO/1e9, BAND_HI/1e9, color='g', alpha=0.12)
-            ax[0].set(title='best |S11|', xlabel='GHz', ylabel='dB'); ax[0].grid(True)
+            ax[0].set(title='best |S11| (worst %.1f dB)' % best['s11_worst'], xlabel='GHz', ylabel='dB')
+            ax[0].grid(True)
             ax[1].plot(best['f_g']/1e9, best['Gr'], 'o-')
-            ax[1].set(title='realized gain (worst %.2f dBi)' % best['gain'], xlabel='GHz', ylabel='dBi')
+            ax[1].set(title='realized gain (worst %.2f dBi, score %.2f)' % (best['gain'], best['score']),
+                      xlabel='GHz', ylabel='dBi')
             ax[1].grid(True)
             fig.tight_layout(); fig.savefig(os.path.join(sim_path, 'live_s11.png'), dpi=110)
             plt.close(fig)
@@ -379,9 +399,10 @@ def main():
             pass
 
     def consider(x, tup):
-        cost, gain, f, s11, f_g, Gr = tup
-        if f is not None and gain > best['gain']:
-            best.update(gain=gain, x=x.copy(), f=f, s11=s11, f_g=f_g, Gr=Gr)
+        cost, gain, f, s11, f_g, Gr, s11_worst, score = tup
+        if f is not None and score > best['score']:
+            best.update(score=score, gain=gain, s11_worst=s11_worst,
+                        x=x.copy(), f=f, s11=s11, f_g=f_g, Gr=Gr)
             save_best(); live_plot()
             return True
         return False
@@ -401,21 +422,24 @@ def main():
             j, x = futs[fut]
             res = fut.result()
             if res is None:
-                tup = (1e9, -np.inf, None, None, None, None)
+                tup = (1e9, -np.inf, None, None, None, None, np.inf, -np.inf)
             else:
-                ff, s11, f_g, Gr, worst_dense = res
-                gain = worst_dense                     # dense worst-in-band (ungameable)
-                cost = -gain + GUIDE_W * resonance_offset(ff, s11)
-                tup = (cost, gain, ff, s11, f_g, Gr)
+                ff, s11, f_g, Gr, worst_dense, worst_s11, converged = res
+                gain = worst_dense                     # dense worst-in-band realized gain (reported)
+                match_pen = MATCH_K * max(0.0, worst_s11 - MATCH_TARGET_DB)   # soft, graded
+                conv_pen = 0.0 if converged else NONCONV_PENALTY
+                score = gain - match_pen - conv_pen    # what the DE actually maximizes
+                cost = -score + GUIDE_W * resonance_offset(ff, s11)
+                tup = (cost, gain, ff, s11, f_g, Gr, worst_s11, score)
             cache[key(x)] = tup
             out[j] = tup
-            history.append((len(history) + 1, x, tup[1]))
+            history.append((len(history) + 1, x, tup[1], tup[6], tup[7]))
             is_best = consider(x, tup)
             save_log()
             save_state()                          # checkpoint after EVERY eval (cache is now current)
             tag = '  <-- NEW BEST' if is_best else ''
-            print('[eval %3d | gen %d] worst-Gr=%+6.2f dBi  x=%s%s'
-                  % (len(history), gen, tup[1], np.round(x, 1), tag))
+            print('[eval %3d | gen %d] gain=%+6.2f dBi  S11=%+5.1f dB  score=%+6.2f  x=%s%s'
+                  % (len(history), gen, tup[1], tup[6], tup[7], np.round(x, 1), tag))
         return out
 
     print('===== fpc3 DE realized-gain (%d workers x %d threads) over %.2f-%.2f GHz | max %d evals ====='
@@ -447,8 +471,8 @@ def main():
             ST.update(pop=pop, pop_cost=pop_cost, gen=gen, rng=rng.getstate())
             save_state()
             new = n_eval[0] - before
-            print('[gen %2d done] evals=%3d  new=%2d  overall-best worst-Gr=%+6.2f dBi'
-                  % (gen, n_eval[0], new, best['gain']))
+            print('[gen %2d done] evals=%3d  new=%2d  best score=%+6.2f (gain %+.2f dBi, S11 %+.1f dB)'
+                  % (gen, n_eval[0], new, best['score'], best['gain'], best['s11_worst']))
             stagnant = stagnant + 1 if new == 0 else 0
             if stagnant >= 3:
                 print('Converged (population collapsed) - stopping.'); break
@@ -456,10 +480,11 @@ def main():
             print('Hit generation cap (%d) - stopping.' % GEN_CAP)
 
     print('\n=========== BEST 3-layer DESIGN ===========')
-    print('worst-in-band realized gain: %+.2f dBi  (%d evals)' % (best['gain'], n_eval[0]))
+    print('score %+.2f  |  worst-in-band realized gain %+.2f dBi  |  worst-in-band S11 %+.1f dB  (%d evals)'
+          % (best['score'], best['gain'], best['s11_worst'], n_eval[0]))
     if best['Gr'] is not None:
-        print('  across band: ' + '  '.join('%.2fGHz=%.2f' % (fg/1e9, gg)
-                                             for fg, gg in zip(best['f_g'], best['Gr'])))
+        print('  gain across band: ' + '  '.join('%.2fGHz=%.2f' % (fg/1e9, gg)
+                                                 for fg, gg in zip(best['f_g'], best['Gr'])))
     print('  params:', dict(zip(names, np.round(best['x'], 2))))
     save_best(); save_log()
 

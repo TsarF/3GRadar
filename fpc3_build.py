@@ -33,8 +33,12 @@ unit = 1e-3
 f0 = 3.25e9
 fc = 1.00e9
 
-eps_r = 2.94
+eps_r = 2.94                     # feed board (PTFE ZYF300CA-C)
 tan_d = 0.0016
+# Per-layer substrate: the PRS and RCM superstrates can use a cheaper laminate than the
+# feed. Defaults = feed PTFE. Set e.g. prs_eps=rcm_eps=4.4, prs_tand=rcm_tand=0.02 for FR4.
+prs_eps  = 2.94; prs_tand  = 0.0016
+rcm_eps  = 2.94; rcm_tand  = 0.0016
 cu_sigma = 5.8e7                  # copper conductivity [S/m] -- finite (not PEC): realistic
 cu_t     = 35e-6                  # copper thickness [m] (1 oz). Loss lowers the runaway cavity
                                   # Q (PEC = infinite Q -> pathological ring-down) and de-biases
@@ -57,9 +61,10 @@ Lf = 10.0
 
 # U-slot in the feed patch (adds a 2nd resonance -> broadband match; paper's slotted feed).
 # The U opens toward -x (feed side). All tunable for the optimizer.
-# U-slot DISABLED: feed-only DE drove it to a vestigial 4x4 (no real 2nd resonance), and the
-# match it found did not survive cavity loading. The feed is matched via in-cavity co-tuning.
-SLOT_ON  = False
+# U-slot on the feed patch: broadbanding lever (adds a 2nd resonance) to break the ~-8 dB
+# match plateau. Re-enabled as IN-CAVITY DE knobs (slot_len/slot_w/slot_x) -- co-tuned WITH
+# the cavity, unlike the earlier feed-only pass whose match did not survive cavity loading.
+SLOT_ON  = True
 slot_len = 8.0                    # U arm length (x)
 slot_w   = 10.0                   # U arm separation / tongue width (y)
 slot_x   = 3.0                    # U base x-position
@@ -238,10 +243,10 @@ def _enforce_min_cell(mesh, floor, protect=None):
 
 def build_antenna(CSX, FDTD):
     _recompute()
-    kappa = 2 * np.pi * f0 * EPS0 * eps_r * tan_d
-    feed_sub = CSX.AddMaterial('feed_sub', epsilon=eps_r, kappa=kappa)
-    prs_sub  = CSX.AddMaterial('prs_sub',  epsilon=eps_r, kappa=kappa)
-    rcm_sub  = CSX.AddMaterial('rcm_sub',  epsilon=eps_r, kappa=kappa)
+    _kap = lambda er, td: 2 * np.pi * f0 * EPS0 * er * td
+    feed_sub = CSX.AddMaterial('feed_sub', epsilon=eps_r,   kappa=_kap(eps_r, tan_d))
+    prs_sub  = CSX.AddMaterial('prs_sub',  epsilon=prs_eps, kappa=_kap(prs_eps, prs_tand))
+    rcm_sub  = CSX.AddMaterial('rcm_sub',  epsilon=rcm_eps, kappa=_kap(rcm_eps, rcm_tand))
     # finite-conductivity copper (not PEC): realistic loss + tames the cavity Q
     def _cu(name):
         return CSX.AddConductingSheet(name, conductivity=cu_sigma, thickness=cu_t)
