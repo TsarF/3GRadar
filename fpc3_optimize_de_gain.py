@@ -35,6 +35,7 @@ import os
 import re
 import sys
 import csv
+import traceback
 import json
 import time
 import pickle
@@ -252,6 +253,13 @@ def eval_worker(payload):
         _rmtree_retry(run_dir)
         return f, s11_dB, f_g, Gr_dBi, worst_dense, worst_s11, (last_db >= 27.0)
     except Exception:
+        try:    # record WHY it failed instead of silently returning -inf
+            fdir = os.path.join(sim_path, 'failures'); os.makedirs(fdir, exist_ok=True)
+            with open(os.path.join(fdir, 'fail_%d.log' % os.getpid()), 'a') as fh:
+                fh.write('\n===== params: %s =====\n' % dict(zip(names, np.round(x, 3))))
+                traceback.print_exc(file=fh)
+        except Exception:
+            pass
         return None
 
 
