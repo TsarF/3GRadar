@@ -69,6 +69,25 @@ def tail(path, n=25):
         return ''
 
 
+def instance_uptime():
+    """Seconds since the instance booted (Linux /proc/uptime); None if unavailable."""
+    try:
+        with open('/proc/uptime') as fh:
+            return float(fh.read().split()[0])
+    except Exception:
+        return None
+
+
+def fmt_dur(s):
+    if s is None:
+        return 'n/a'
+    d, r = divmod(int(s), 86400)
+    h, r = divmod(r, 3600)
+    m, _ = divmod(r, 60)
+    out = (['%dd' % d] if d else []) + (['%dh' % h] if d or h else []) + ['%dm' % m]
+    return ' '.join(out)
+
+
 def convergence_png(rows):
     ev, s11, score = [], [], []
     for r in rows:
@@ -157,7 +176,7 @@ pre{background:#010409;padding:10px;border-radius:6px;overflow-x:auto;font-size:
 .lab{color:#8b949e;font-size:12px}
 </style></head><body>
 <h1>fpc3 DE search &mdash; %s</h1>
-<h2>%d evals &middot; auto-refresh %ds &middot; %s</h2>
+<h2>%d evals &middot; auto-refresh %ds &middot; instance up %s &middot; %s</h2>
 <div class="card"><div class="row">
   <div><div class="lab">best score</div><div class="big">%s</div></div>
   <div><div class="lab">realized gain</div><div class="big">%s</div></div>
@@ -170,7 +189,8 @@ pre{background:#010409;padding:10px;border-radius:6px;overflow-x:auto;font-size:
 <tr>%s</tr>%s</table></div>
 <div class="card"><h2>driver.out (tail)</h2><pre>%s</pre></div>
 </body></html>""" % (
-        REFRESH, TAG, TAG, nev, REFRESH, time.strftime('%Y-%m-%d %H:%M:%S'),
+        REFRESH, TAG, TAG, nev, REFRESH, fmt_dur(instance_uptime()),
+        time.strftime('%Y-%m-%d %H:%M:%S'),
         fnum(score), fnum(gain, ' dBi'), fnum(s11b, ' dB'), badge_c, badge_t,
         img(conv), ptbl or '<td>(none yet)</td>', img(live),
         ''.join('<th>%s</th>' % h for h in head), ''.join(trows),
