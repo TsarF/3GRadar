@@ -65,10 +65,13 @@ GUIDE_W          = 2.0
 
 # Soft match penalty: realized gain barely punishes a bad match (a -5 dB match only costs
 # 1.65 dB of gain), so the DE happily trades match for directivity. We subtract a GRADED
-# penalty for worst-in-band |S11| above the target -- soft (not a hard floor) so it still
-# gives a gradient while nothing yet reaches -10 dB. score = gain - MATCH_K*max(0, S11-target).
-MATCH_TARGET_DB  = -10.0
-MATCH_K          = 1.0   # dB of score lost per dB of worst-in-band S11 above the target
+# penalty for worst-in-band |S11| above the target: score = gain - MATCH_K*max(0, S11-target).
+# MATCH_K=1 proved TOO WEAK -- the DE maximized gain (to +14 dBi) and left S11 at ~-2 dB, using
+# a big slot/tall cavity to pump gain instead of matching. MATCH_K>=3 makes closing the match
+# gap worth more than the whole gain range, so the DE gets matched FIRST, then maximizes gain
+# among matched designs (and reveals the best achievable match if -10 dB is out of reach).
+MATCH_TARGET_DB  = float(os.environ.get('FPC_MATCH_TARGET_DB', '-10.0'))
+MATCH_K          = float(os.environ.get('FPC_MATCH_K', '3.0'))   # dB of score per dB of S11 over target
 NONCONV_PENALTY  = 15.0  # score penalty when the field didn't settle (untrustworthy far-field)
 
 # --- parallelism / run-identity are ENV-CONFIGURABLE so the SAME script + checkpoint format
