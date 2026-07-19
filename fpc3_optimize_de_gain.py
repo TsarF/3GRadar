@@ -106,6 +106,12 @@ PARAMS = {
     'slot_len': (8.0,         3.0, 16.0, 0.5),  # U arm length (x)
     'slot_w':   (10.0,        4.0, 22.0, 0.5),  # U arm separation / tongue width (y)
     'slot_x':   (3.0,         1.0, 10.0, 0.5),  # U base x-position
+    # PRS reflectivity = cavity Q knobs. The slot alone couldn't match 9% because the fixed
+    # high-|Gamma| PRS makes Q~22 (Bode-Fano: ~4.5% match BW). LOWER r1 / thinner mesh_wt ->
+    # more transmissive PRS -> lower Q -> wider match. With the K match penalty, the DE lowers
+    # Q just enough to hit -10 dB, then keeps gain as high as possible -> optimal gain-vs-BW.
+    'r1':       (p1.r1,       4.0, 10.5, 0.25), # PRS top-layer disc radius (dominant |Gamma|)
+    'mesh_wt':  (p1.mesh_wt,  0.3,  2.0, 0.1),  # PRS bottom wire-mesh trace width
 }
 
 # Warm-start seed: own checkpoint by default; set FPC_WARM to a path (e.g. the other
