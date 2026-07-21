@@ -19,7 +19,9 @@ YOUR IP only. It's read-only, non-sensitive data, but don't expose it to 0.0.0.0
 
 import os
 import io
+import re
 import csv
+import glob
 import json
 import base64
 import time
@@ -33,6 +35,7 @@ import matplotlib.pyplot as plt
 TAG     = os.environ.get('FPC_TAG', '_v3')
 PORT    = int(os.environ.get('FPC_DASH_PORT', '8080'))
 REFRESH = int(os.environ.get('FPC_DASH_REFRESH', '30'))
+NRTS    = int(os.environ.get('FPC_DASH_NRTS', '150000'))   # match the optimizer's EVAL_NRTS cap
 DIR     = os.path.join(os.getcwd(), 'fpc3_gain_de_opt' + TAG)
 
 
@@ -86,6 +89,56 @@ def fmt_dur(s):
     m, _ = divmod(r, 60)
     out = (['%dd' % d] if d else []) + (['%dh' % h] if d or h else []) + ['%dm' % m]
     return ' '.join(out)
+
+
+_TS_RE = re.compile(r'Timestep:\s*(\d+).*?Energy:.*?\(-\s*([0-9.]+)dB\)')
+
+
+def worker_progress():
+    """Per-worker eval progress from the openEMS logs: current timestep + energy-decay dB.
+    An eval finishes at the -30 dB EndCriteria or the NRTS cap, so % done = how far it is
+    toward whichever it hits first."""
+    out = []
+    now = time.time()
+    for lf in glob.glob(os.path.join(DIR, 'openems_logs', 'worker_*.log')):
+        try:
+            age = now - os.path.getmtime(lf)
+            with open(lf, 'rb') as fh:              # only the tail holds the latest line
+                fh.seek(0, 2); size = fh.tell()
+                fh.seek(max(0, size - 6000))
+                chunk = fh.read().decode('utf-8', 'ignore')
+            m = None
+            for mm in _TS_RE.finditer(chunk):
+                m = mm
+            if not m:
+                continue
+            ts, db = int(m.group(1)), float(m.group(2))
+            pid = re.search(r'worker_(\d+)', lf).group(1)
+            pct = int(100 * min(1.0, max(min(db / 30.0, 1.0), ts / NRTS)))
+            out.append(dict(pid=pid, ts=ts, db=db, age=age, pct=pct))
+        except Exception:
+            continue
+    return out
+
+
+def workers_card():
+    ws = [w for w in worker_progress() if w['age'] < 180]     # "active" = log touched recently
+    if not ws:
+        return ('<div class="card"><h2>workers</h2>'
+                '<i>no active worker logs (idle / between evals / post-processing)</i></div>')
+    ws.sort(key=lambda w: -w['pct'])
+    rows = []
+    for w in ws:
+        col = '#2ea043' if w['pct'] >= 90 else ('#1f6feb' if w['pct'] >= 40 else '#8957e5')
+        bar = ('<div style="background:#30363d;border-radius:4px;height:14px;width:200px;'
+               'display:inline-block;vertical-align:middle"><div style="background:%s;height:14px;'
+               'border-radius:4px;width:%d%%"></div></div>') % (col, w['pct'])
+        rows.append('<tr><td>%s</td><td>%d</td><td>-%.1f dB</td><td>%s&nbsp;%d%%</td><td>%.0fs ago</td></tr>'
+                    % (w['pid'], w['ts'], w['db'], bar, w['pct'], w['age']))
+    return ('<div class="card"><h2>workers &mdash; ring-down progress toward finishing (%d active)</h2>'
+            '<table><tr><th>worker</th><th>timestep</th><th>energy decay</th>'
+            '<th>progress (to -30 dB / %dk cap)</th><th>updated</th></tr>%s</table></div>'
+            % (len(ws), NRTS // 1000, ''.join(rows)))
 
 
 def convergence_png(rows):
@@ -183,6 +236,7 @@ pre{background:#010409;padding:10px;border-radius:6px;overflow-x:auto;font-size:
   <div><div class="lab">worst-in-band S11</div><div class="big">%s</div></div>
   <div><span class="badge" style="background:%s">%s</span></div>
 </div></div>
+%s
 <div class="card"><h2>convergence (is S11 breaking -8 &rarr; -10 dB?)</h2>%s</div>
 <div class="card"><h2>best design</h2><table><tr>%s</tr></table><br>%s</div>
 <div class="card"><h2>recent evals (green = new best)</h2><table>
@@ -192,6 +246,7 @@ pre{background:#010409;padding:10px;border-radius:6px;overflow-x:auto;font-size:
         REFRESH, TAG, TAG, nev, REFRESH, fmt_dur(instance_uptime()),
         time.strftime('%Y-%m-%d %H:%M:%S'),
         fnum(score), fnum(gain, ' dBi'), fnum(s11b, ' dB'), badge_c, badge_t,
+        workers_card(),
         img(conv), ptbl or '<td>(none yet)</td>', img(live),
         ''.join('<th>%s</th>' % h for h in head), ''.join(trows),
         html.escape(drv) or '(no driver.out yet)')
