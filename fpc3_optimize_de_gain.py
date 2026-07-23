@@ -110,7 +110,11 @@ PARAMS = {
     # high-|Gamma| PRS makes Q~22 (Bode-Fano: ~4.5% match BW). LOWER r1 / thinner mesh_wt ->
     # more transmissive PRS -> lower Q -> wider match. With the K match penalty, the DE lowers
     # Q just enough to hit -10 dB, then keeps gain as high as possible -> optimal gain-vs-BW.
-    'r1':       (p1.r1,       4.0, 10.5, 0.25), # PRS top-layer disc radius (dominant |Gamma|)
+    # r1 bounds are env-overridable (FPC_R1_LO/HI) so you can FORCE a transmissive, low-Q PRS
+    # (e.g. FPC_R1_HI=6.5) to test whether opening the cavity actually improves the match --
+    # the free search collapses to high r1 and never tests the low-Q regime on its own.
+    'r1':       (p1.r1, float(os.environ.get('FPC_R1_LO', '4.0')),
+                        float(os.environ.get('FPC_R1_HI', '10.5')), 0.25),  # PRS disc radius
     'mesh_wt':  (p1.mesh_wt,  0.3,  2.0, 0.1),  # PRS bottom wire-mesh trace width
 }
 
