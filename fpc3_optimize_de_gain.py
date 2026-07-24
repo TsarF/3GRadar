@@ -116,6 +116,10 @@ PARAMS = {
     'r1':       (p1.r1, float(os.environ.get('FPC_R1_LO', '4.0')),
                         float(os.environ.get('FPC_R1_HI', '10.5')), 0.25),  # PRS disc radius
     'mesh_wt':  (p1.mesh_wt,  0.3,  2.0, 0.1),  # PRS bottom wire-mesh trace width
+    # RCM tile footprint on the fixed 43 mm grid -> sets the INTER-TILE gap (P_RCM - rcm_s),
+    # which was frozen at 2 mm. Smaller rcm_s = bigger gaps between tiles (more transmissive
+    # RCM / shifts its resonances); sub-squares scale with the footprint.
+    'rcm_s':    (p1.rcm_s,   33.0, 42.5, 0.5),  # inter-tile gap = 43 - rcm_s (was fixed 2 mm)
 }
 
 # Warm-start seed: own checkpoint by default; set FPC_WARM to a path (e.g. the other
@@ -389,7 +393,7 @@ def main():
                        'worst_in_band_S11_dB': best['s11_worst'],
                        'gain_across_band': None if best['Gr'] is None else list(map(float, best['Gr'])),
                        'band_GHz': [BAND_LO/1e9, BAND_HI/1e9], 'evals_so_far': n_eval[0],
-                       'fixed_mm': {'rcm_s': p1.rcm_s, 'sb': p1.sb, 'N_PRS': p1.N_PRS, 'P': p1.P,
+                       'fixed_mm': {'sb': p1.sb, 'N_PRS': p1.N_PRS, 'P': p1.P, 'P_RCM': p1.P_RCM,
                                     'RCM_MAP': p1.RCM_MAP},
                        'params_mm': bx}, fh, indent=2)
         os.replace(tmp, os.path.join(sim_path, 'optimized_params.json'))
