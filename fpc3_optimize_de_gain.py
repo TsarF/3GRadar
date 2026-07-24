@@ -103,9 +103,9 @@ PARAMS = {
     'W':        (p1.W,       26.0, 33.0, 0.2),  # patch width (match: input impedance / Q)
     # U-slot on the feed patch = broadbanding lever (adds a 2nd resonance) to break the ~-8 dB
     # match plateau. Co-tuned WITH the cavity here (feed-only tuning did NOT transfer).
-    'slot_len': (8.0,         3.0, 16.0, 0.5),  # U arm length (x)
-    'slot_w':   (10.0,        4.0, 22.0, 0.5),  # U arm separation / tongue width (y)
-    'slot_x':   (3.0,         1.0, 10.0, 0.5),  # U base x-position
+    'slot_len': (p1.slot_len, 3.0, 16.0, 0.5),  # U arm length (x)
+    'slot_w':   (p1.slot_w,   4.0, 22.0, 0.5),  # U arm separation / tongue width (y)
+    'slot_x':   (p1.slot_x,   1.0, 10.0, 0.5),  # U base x-position
     # PRS reflectivity = cavity Q knobs. The slot alone couldn't match 9% because the fixed
     # high-|Gamma| PRS makes Q~22 (Bode-Fano: ~4.5% match BW). LOWER r1 / thinner mesh_wt ->
     # more transmissive PRS -> lower Q -> wider match. With the K match penalty, the DE lowers
