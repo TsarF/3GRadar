@@ -47,15 +47,14 @@ h_sub = 1.52
 h_prs = 1.52
 h_rcm = 1.52                      # RCM board
 
-# Feed -- current best from the 6-knob feed+cavity realized-gain DE (co-tuned WITH the
-# cavity: feed-only matching does NOT transfer, since the cavity loads the feed to R~15-30
-# ohm, X->+77j). Best so far: worst-in-band realized gain +9.40 dBi across 3.1-3.4 GHz.
+# Feed -- current best from the 11-knob feed+cavity+PRS-Q DE (match-penalized, K=8).
+# Best so far: worst-in-band S11 -4.42 dB, realized gain +11.53 dBi (still converging).
 # These defaults double as the optimizer's warm-start seed (used when no de_state/JSON exists,
 # e.g. a fresh EC2 clone), so the search resumes from this design without any file copy.
-L  = 24.5
+L  = 27.4
 W  = 30.8
 Wf = 3.89
-y0 = 5.0
+y0 = 8.2
 g  = 1.0
 Lf = 10.0
 
@@ -65,9 +64,9 @@ Lf = 10.0
 # match plateau. Re-enabled as IN-CAVITY DE knobs (slot_len/slot_w/slot_x) -- co-tuned WITH
 # the cavity, unlike the earlier feed-only pass whose match did not survive cavity loading.
 SLOT_ON  = True
-slot_len = 8.0                    # U arm length (x)
-slot_w   = 10.0                   # U arm separation / tongue width (y)
-slot_x   = 3.0                    # U base x-position
+slot_len = 13.0                   # U arm length (x)
+slot_w   = 21.0                   # U arm separation / tongue width (y)
+slot_x   = 2.0                    # U base x-position
 slot_sw  = 1.0                    # slot channel width
 
 FEED_ONLY = False                 # True -> bare feed patch only (no PRS/RCM), for fast slot tuning
@@ -85,16 +84,16 @@ Lt   = 15.68                      # quarter-wave transformer length (lambda_g/4 
 # Dual-layer PRS
 N_PRS = 8                         # 8x8 units (per the paper)
 P     = 21.5
-r1    = 10
+r1    = 10.5
 pb    = 20.7
 sb    = 16.0
-h_cav = 52.0                      # ground -> PRS bottom face (Trentini height; DE co-opt best)
+h_cav = 51.0                      # ground -> PRS bottom face (Trentini height; DE co-opt best)
 
 # PRS bottom = fine INDUCTIVE wire mesh (paper's "meshed patch"), not isolated loops.
 # Gives ~4x flatter reflection-phase slope + rising |Gamma| -> wideband. (unit-cell tuned)
 PRS_MESH = True                   # True -> wire mesh; False -> square loop (old)
 mesh_N   = 1                      # holes per cell side (4 -> ~8M cells, tractable; slope -9)
-mesh_wt  = 0.6                    # mesh trace width (mm)
+mesh_wt  = 1.5                    # mesh trace width (mm)
 
 # RCM (second reflector). Per the paper: a COARSE grid at ~2x the PRS period, so each
 # RCM cell spans 2x2 PRS cells and the largest tile ~= two PRS cells wide.
@@ -102,7 +101,7 @@ RCM_ON = True
 N_RCM  = 4                        # 4x4 RCM cells over the 8x8 PRS (2x2 PRS cells each)
 P_RCM  = 2 * P                    # RCM period = 2x PRS period = 43 mm
 rcm_s  = 41.0                     # RCM tile size (~2 PRS cells; large square)
-h3     = 51.0                     # PRS top -> RCM plane (DE co-opt best)
+h3     = 49.0                     # PRS top -> RCM plane (DE co-opt best)
 
 # Multi-size RCM (paper's bandwidth mechanism): each RCM super-cell is SUBDIVIDED into an
 # NxN array of squares. Interleaving tiles of 1x1 / 3x3 / 4x4 staggers their resonances
@@ -116,7 +115,7 @@ RCM_MULTI = True                  # True -> subdivided tiles per RCM_MAP; False 
 RCM_MAP   = [3, 4, 4, 3, 4, 1, 1, 4, 4, 1, 1, 4, 3, 4, 4, 3]
 # every tile has the SAME footprint (rcm_s), so inter-tile gaps are all identical
 # (P_RCM - rcm_s). Sub-squares fill that footprint edge-to-edge, split by rcm_gap.
-rcm_gap   = 5.5                   # spacing between sub-squares within a tile (DE co-opt best)
+rcm_gap   = 7.5                   # spacing between sub-squares within a tile (DE co-opt best)
 
 air_xy, air_above, air_below = 35.0, 45.0, 20.0
 feed_R = 50.0
