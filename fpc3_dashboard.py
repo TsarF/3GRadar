@@ -35,7 +35,7 @@ import matplotlib.pyplot as plt
 TAG     = os.environ.get('FPC_TAG', '_v3')
 PORT    = int(os.environ.get('FPC_DASH_PORT', '8080'))
 REFRESH = int(os.environ.get('FPC_DASH_REFRESH', '30'))
-NRTS    = int(os.environ.get('FPC_DASH_NRTS', '150000'))   # match the optimizer's EVAL_NRTS cap
+NRTS    = int(os.environ.get('FPC_DASH_NRTS', '300000'))   # match the optimizer's EVAL_NRTS cap
 DIR     = os.path.join(os.getcwd(), 'fpc3_gain_de_opt' + TAG)
 
 

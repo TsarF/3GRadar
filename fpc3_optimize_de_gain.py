@@ -132,8 +132,9 @@ WARM_START_FROM = os.environ.get('FPC_WARM', os.path.join(sim_path, 'optimized_p
 # durable storage (persistent EBS or an S3-synced dir) so it survives instance replacement.
 CKPT_PATH = os.environ.get('FPC_CKPT', os.path.join(sim_path, 'de_state.pkl'))
 
-EVAL_NRTS        = 150000         # safety ceiling; with PML sides most evals hit the -30 dB
-EVAL_ENDCRITERIA = 1e-3           # EndCriteria (~77k steps for Q~22) well before this cap
+EVAL_NRTS        = int(os.environ.get('FPC_NRTS', '300000'))  # timestep cap (env-configurable);
+                                  # raised 150k->300k so high-Q designs (r1 high) ring down to the
+EVAL_ENDCRITERIA = 1e-3           # -30 dB EndCriteria instead of truncating + taking the -15 penalty
 EVAL_NFREQ       = 121   # dense |S11| grid for the ungameable worst-in-band match term
 EVAL_FPAD        = 0.15e9
 
